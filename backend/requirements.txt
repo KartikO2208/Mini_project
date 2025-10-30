@@ -1,0 +1,17 @@
+fastapi
+uvicorn
+sqlalchemy
+alembic
+psycopg2-binary
+pydantic
+networkx
+pandas
+openpyxl
+python-multipart
+aiofiles
+redis
+celery
+boto3
+python-dotenv
+pytest
+pytest-asyncio
