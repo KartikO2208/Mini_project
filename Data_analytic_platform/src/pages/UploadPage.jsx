@@ -19,6 +19,7 @@ export default function UploadPage() {
   const [error, setError] = useState(null);
   const navigate = useNavigate();
   const setAnalysisData = useDashboardStore((state) => state.setAnalysisData);
+  const setFileInStore = useDashboardStore((state) => state.setFile);
 
   // --- Step 1: User selects a file ---
   const handleFileChange = (event) => {
@@ -26,6 +27,7 @@ export default function UploadPage() {
     if (!selectedFile) return;
 
     setFile(selectedFile);
+    setFileInStore(selectedFile); // Store file in global store for PipelineView
     setError(null);
     setAnalysisData(null);
 
@@ -77,6 +79,7 @@ export default function UploadPage() {
   // --- Helper to reset the page ---
   const resetUpload = () => {
     setFile(null);
+    setFileInStore(null); // Clear file from global store
     setFileHeaders([]);
     setStep(1);
   };

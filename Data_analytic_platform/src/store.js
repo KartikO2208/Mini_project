@@ -10,6 +10,7 @@ export default create((set) => ({
   tableData: null,
   dataHealth: null,
   correlationMatrix: null,
+  file: null,
   
   // --- This function is now "safer" ---
   setAnalysisData: (data) => set({
@@ -23,6 +24,19 @@ export default create((set) => ({
     correlationMatrix: data?.correlationMatrix || null,
   }),
   
+  setPipelineData: (data) => set({
+    kpiData: data?.kpiData || null,
+    insights: data?.insights || null,
+    dictionary: data?.dictionary || null,
+    columnDist: data?.columnDist || null,
+    timeSeries: data?.timeSeries || null,
+    tableData: data?.tableData || null,
+    dataHealth: data?.dataHealth || null,
+    correlationMatrix: data?.correlationMatrix || null,
+  }),
+  
+  setFile: (file) => set({ file }),
+  
   clearAnalysisData: () => set({
     kpiData: null,
     insights: null,
@@ -32,5 +46,6 @@ export default create((set) => ({
     tableData: null,
     dataHealth: null,
     correlationMatrix: null,
+    file: null,
   }),
 }));
