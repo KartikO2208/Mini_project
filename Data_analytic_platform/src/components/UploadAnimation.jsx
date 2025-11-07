@@ -1,7 +1,7 @@
 import React from 'react';
 import { Database, BarChart2, Zap } from 'lucide-react';
 
-export  function UploadAnimation() {
+export default function UploadAnimation() {
   // Simple CSS-based animation.
   const style = {
     display: 'flex',

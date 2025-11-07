@@ -7,6 +7,7 @@ pydantic
 networkx
 pandas
 openpyxl
+statsmodels
 python-multipart
 aiofiles
 redis

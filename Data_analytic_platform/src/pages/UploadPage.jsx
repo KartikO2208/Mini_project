@@ -1,49 +1,47 @@
+
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import useDashboardStore from '../store';
-import { UploadAnimation } from '../components/UploadAnimation';
+import UploadAnimation from '../components/UploadAnimation';
 import { UploadCloud, FileCheck, Loader, ArrowRight } from 'lucide-react';
-import Papa from 'papaparse'; // Import the CSV parser
+import Papa from 'papaparse';
 
+// We use 'export default' to match your project's pattern
 export default function UploadPage() {
   const [file, setFile] = useState(null);
-  const [fileHeaders, setFileHeaders] = useState([]); // To store column names
-  const [step, setStep] = useState(1); // 1: Upload, 2: Map Columns
+  const [fileHeaders, setFileHeaders] = useState([]);
+  const [step, setStep] = useState(1);
   
-  // State for user's column choices
   const [distColumn, setDistColumn] = useState('');
   const [timeColumn, setTimeColumn] = useState('');
 
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
   const navigate = useNavigate();
-  const setAnalysisData = useDashboardStore((state) => state.setAnalysisData);
-  const setFileInStore = useDashboardStore((state) => state.setFile);
+  
+  // Get the new function from the store
+  const setInitialAnalysis = useDashboardStore((state) => state.setInitialAnalysis);
 
-  // --- Step 1: User selects a file ---
   const handleFileChange = (event) => {
     const selectedFile = event.target.files[0];
     if (!selectedFile) return;
 
     setFile(selectedFile);
-    setFileInStore(selectedFile); // Store file in global store for PipelineView
     setError(null);
-    setAnalysisData(null);
+    setStep(2);
 
-    // --- NEW: Parse headers on select ---
     Papa.parse(selectedFile, {
       preview: 1, // Only read the first row
       complete: (results) => {
-        setFileHeaders(results.data[0]); // Save the array of column names
-        setDistColumn(results.data[0][0]); // Set default dropdown values
-        setTimeColumn(results.data[0][0]); // Set default dropdown values
-        setStep(2); // Move to the column mapping step
+        setFileHeaders(results.data[0]);
+        // Auto-select defaults
+        setDistColumn(results.data[0].find(h => h.includes('category')) || results.data[0][0]);
+        setTimeColumn(results.data[0].find(h => h.includes('date')) || results.data[0][0]);
       }
     });
   };
 
-  // --- Step 2: User clicks "Analyze" ---
   const handleRunAnalysis = async () => {
     if (!file) return;
 
@@ -52,21 +50,20 @@ export default function UploadPage() {
 
     const formData = new FormData();
     formData.append('file', file);
-    
-    // --- NEW: Append the user's column choices ---
     formData.append('col_dist_target', distColumn);
     formData.append('col_time_target', timeColumn);
 
     try {
+      // This is the initial analysis call
       const response = await axios.post("http://127.0.0.1:8000/api/v1/analyze", formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
       
-      setAnalysisData(response.data);
+      // --- NEW: Save the base data and file to the store ---
+      setInitialAnalysis(file, response.data);
+      
       setIsLoading(false);
-
-      // Redirect to the dashboard
-      navigate('/dashboard');
+      navigate('/workspace'); // <-- NEW: Redirect to the workspace
 
     } catch (err) {
       setIsLoading(false);
@@ -76,10 +73,8 @@ export default function UploadPage() {
     }
   };
 
-  // --- Helper to reset the page ---
   const resetUpload = () => {
     setFile(null);
-    setFileInStore(null); // Clear file from global store
     setFileHeaders([]);
     setStep(1);
   };
@@ -88,7 +83,6 @@ export default function UploadPage() {
     <div className="upload-page-container">
       <div className="upload-box" style={{width: '600px'}}>
         
-        {/* --- STEP 1: UPLOAD FILE --- */}
         {step === 1 && (
           <>
             <UploadAnimation />
@@ -106,7 +100,6 @@ export default function UploadPage() {
           </>
         )}
 
-        {/* --- STEP 2: MAP COLUMNS --- */}
         {step === 2 && (
           <>
             <h2 style={{marginBottom: '20px'}}>Map Your Data Columns</h2>
