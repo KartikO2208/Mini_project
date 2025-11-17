@@ -1,7 +1,208 @@
 import pandas as pd
 import numpy as np
+import io
+from pathlib import Path
 from statsmodels.tsa.arima.model import ARIMA
 from statsmodels.tsa.seasonal import seasonal_decompose
+
+def read_uploaded_file_to_df(file_contents: bytes, file_name: str) -> pd.DataFrame:
+    """
+    Reads a file's contents into a pandas DataFrame, automatically
+    detecting the file type from its extension.
+    """
+    extension = Path(file_name).suffix.lower()
+    
+    try:
+        if extension == '.csv':
+            try:
+                # Try standard utf-8
+                df = pd.read_csv(io.StringIO(file_contents.decode('utf-8')))
+            except UnicodeDecodeError:
+                # Fallback to latin-1
+                df = pd.read_csv(io.StringIO(file_contents.decode('latin-1')))
+        
+        elif extension in ['.xls', '.xlsx']:
+            # Excel files must be read from bytes
+            # Determine the engine to use
+            if extension == '.xlsx':
+                engine = 'openpyxl'
+            else:
+                # For .xls files, try to use xlrd, but fallback to openpyxl or None
+                engine = None
+                try:
+                    import xlrd
+                    engine = 'xlrd'
+                except ImportError:
+                    # xlrd not installed, try openpyxl or let pandas choose
+                    engine = 'openpyxl'  # openpyxl can sometimes handle .xls
+            
+            # Try multiple approaches to read the Excel file
+            df = None
+            last_error = None
+            
+            # Approach 1: Try reading with header=0 (standard approach)
+            try:
+                buffer = io.BytesIO(file_contents)
+                read_params = {
+                    'io': buffer,
+                    'sheet_name': 0,
+                    'header': 0,
+                }
+                if engine:
+                    read_params['engine'] = engine
+                    
+                df = pd.read_excel(**read_params)
+            except Exception as e1:
+                last_error = e1
+                # Approach 2: Try reading without header, then detect it
+                try:
+                    buffer = io.BytesIO(file_contents)
+                    read_params = {
+                        'io': buffer,
+                        'sheet_name': 0,
+                        'header': None,  # No header
+                    }
+                    if engine:
+                        read_params['engine'] = engine
+                    else:
+                        # Try without engine specification
+                        pass
+                    
+                    df_temp = pd.read_excel(**read_params)
+                    
+                    # Find first row with substantial data (likely the header)
+                    header_idx = 0
+                    max_cols = len(df_temp.columns) if len(df_temp.columns) > 0 else 1
+                    for idx in range(min(10, len(df_temp))):  # Check first 10 rows
+                        row = df_temp.iloc[idx]
+                        non_null = row.notna().sum()
+                        if non_null >= max(2, max_cols * 0.3):  # At least 30% filled or 2 columns
+                            header_idx = idx
+                            break
+                    
+                    # Use the detected header row
+                    if header_idx >= 0 and header_idx < len(df_temp):
+                        # Set the header row - safely get column values
+                        header_row = df_temp.iloc[header_idx]
+                        new_columns = []
+                        for i, val in enumerate(header_row):
+                            if pd.notna(val) and str(val).strip():
+                                new_columns.append(str(val).strip())
+                            else:
+                                new_columns.append(f'Unnamed_{i}')
+                        df_temp.columns = new_columns[:len(df_temp.columns)]
+                        # Skip the header row and any rows before it
+                        if header_idx + 1 < len(df_temp):
+                            df = df_temp.iloc[header_idx + 1:].copy().reset_index(drop=True)
+                        else:
+                            df = df_temp.iloc[header_idx:].copy().reset_index(drop=True)
+                    else:
+                        df = df_temp.copy()
+                    last_error = None
+                except Exception as e2:
+                    last_error = e2
+                    # Approach 3: Try with openpyxl engine regardless of extension
+                    try:
+                        buffer = io.BytesIO(file_contents)
+                        df = pd.read_excel(
+                            buffer,
+                            sheet_name=0,
+                            header=0,
+                            engine='openpyxl'
+                        )
+                        last_error = None
+                    except Exception as e3:
+                        last_error = e3
+                        # Approach 4: Try without specifying engine (let pandas decide)
+                        try:
+                            buffer = io.BytesIO(file_contents)
+                            df = pd.read_excel(
+                                buffer,
+                                sheet_name=0,
+                                header=0
+                            )
+                            last_error = None
+                        except Exception as e4:
+                            last_error = e4
+            
+            if df is None:
+                error_msg = str(last_error) if last_error else "Unknown error"
+                # Provide more helpful error message
+                if 'tokenizing' in error_msg.lower():
+                    raise ValueError(
+                        f"Error reading Excel file '{file_name}'. The file may have formatting issues "
+                        f"such as merged cells, inconsistent rows, or empty header rows. "
+                        f"Please check the file structure. Original error: {error_msg}"
+                    )
+                else:
+                    raise ValueError(
+                        f"Error reading Excel file '{file_name}': {error_msg}. "
+                        f"Please ensure the file is a valid Excel file (.xls or .xlsx) and not corrupted."
+                    )
+            
+            # Clean up the dataframe: remove completely empty rows and columns
+            df = df.dropna(how='all').dropna(axis=1, how='all')
+            
+            # If dataframe is empty after cleanup, the file might have issues
+            if df.empty:
+                raise ValueError("Excel file appears to be empty or contains no valid data rows.")
+            
+            # Reset index
+            df = df.reset_index(drop=True)
+            
+            # Ensure column names are valid (no NaN column names, handle duplicates)
+            new_columns = []
+            seen = {}
+            for i, col in enumerate(df.columns):
+                col_str = str(col).strip() if pd.notna(col) else f'Unnamed_{i}'
+                if col_str == '' or col_str == 'nan':
+                    col_str = f'Unnamed_{i}'
+                # Handle duplicate column names
+                if col_str in seen:
+                    count = seen[col_str]
+                    seen[col_str] = count + 1
+                    col_str = f'{col_str}_{count}'
+                else:
+                    seen[col_str] = 1
+                new_columns.append(col_str)
+            df.columns = new_columns
+        
+        elif extension == '.json':
+            # JSON is text
+            df = pd.read_json(io.StringIO(file_contents.decode('utf-8')))
+        
+        elif extension == '.parquet':
+            # Parquet is binary
+            df = pd.read_parquet(io.BytesIO(file_contents))
+            
+        elif extension == '.feather':
+            # Feather is binary
+            df = pd.read_feather(io.BytesIO(file_contents))
+            
+        elif extension == '.h5':
+            # HDF5 is binary
+            df = pd.read_hdf(io.BytesIO(file_contents))
+            
+        else:
+            raise ValueError(f"Unsupported file type: {extension}")
+        
+        # Final validation: ensure we have a valid dataframe
+        if df.empty:
+            raise ValueError("The file appears to be empty or contains no valid data.")
+        
+        return df
+        
+    except ValueError:
+        # Re-raise ValueError as-is (these are our custom errors)
+        raise
+    except Exception as e:
+        print(f"Error reading {file_name}: {e}")
+        import traceback
+        traceback.print_exc()
+        # Re-raise the error so the frontend can see it
+        raise ValueError(f"Error analyzing file: {str(e)}")
+
+
 
 # --- Helper function for finding anomalies ---
 def get_anomalies(df, numeric_col):
@@ -166,28 +367,44 @@ def get_forecasting(monthly_data):
 # --- UPGRADED FUNCTION ---
 # ... (all your other functions like get_kpis, get_forecasting, etc. are fine) ...
 
+# ... (keep all your other functions like get_kpis, get_anomalies, etc.) ...
+
 # --- REPLACE THIS ENTIRE FUNCTION ---
 def get_time_series_data(df, target_column=None):
-    """Finds the first datetime column (or uses target_column) and aggregates by month."""
+    """
+    Finds the first datetime column (or uses target_column) and aggregates by month.
+    """
     if df.empty:
         return {"timeColumn": None, "seriesData": [], "xAxisData": []}
         
     date_col = target_column
     
+    # --- NEW "AUTO-GUESS" LOGIC ---
     if date_col is None:
-        # --- Fallback "Auto-Guess" Logic ---
+        # First, look for column names that contain "date" or "time"
         for col in df.columns:
-            if df[col].isnull().all():
-                continue
-            try:
-                temp_col = pd.to_datetime(df[col], errors='coerce')
-                if temp_col.isnull().all() or temp_col.nunique() <= 1:
+            if 'date' in col.lower() or 'time' in col.lower():
+                try:
+                    temp_col = pd.to_datetime(df[col], errors='coerce')
+                    if not temp_col.isnull().all() and temp_col.nunique() > 1:
+                        date_col = col # Found it!
+                        df[date_col] = temp_col
+                        break
+                except Exception:
+                    continue # Try next column
+        
+        # If still not found, try converting *all* object columns
+        if date_col is None:
+             for col in df.select_dtypes(include='object').columns:
+                try:
+                    temp_col = pd.to_datetime(df[col], errors='coerce')
+                    if not temp_col.isnull().all() and temp_col.nunique() > 1:
+                        date_col = col # Found it!
+                        df[date_col] = temp_col
+                        break
+                except Exception:
                     continue
-                date_col = col
-                df[date_col] = temp_col
-                break
-            except Exception:
-                continue
+    # --- END OF NEW LOGIC ---
     else:
         # User provided a column, we MUST try to convert it
         if target_column not in df.columns:
@@ -200,12 +417,11 @@ def get_time_series_data(df, target_column=None):
             date_col = None # Conversion failed
 
     if date_col is None:
+        # If still no date column, return empty
         return {"timeColumn": None, "seriesData": [], "xAxisData": []}
 
     # Aggregate by month-end frequency ('ME')
     monthly_counts = df.set_index(date_col).resample('ME').size()
-    
-    # --- START OF NEW LOGIC ---
     
     # --- Prepare data for ECharts ---
     actual_data_values = monthly_counts.tolist()
@@ -221,9 +437,7 @@ def get_time_series_data(df, target_column=None):
     all_dates = actual_data_dates + forecast_data_dates
     
     # Create padded series data
-    # Actual = [1, 2, 3, None, None]
     actual_series_padded = actual_data_values + ([None] * len(forecast_data_values))
-    # Forecast = [None, None, None, 4, 5]
     forecast_series_padded = ([None] * len(actual_data_values)) + forecast_data_values
 
     series_data = [
@@ -235,7 +449,6 @@ def get_time_series_data(df, target_column=None):
         }
     ]
     
-    # Add the forecast series *only if* it was successful
     if forecast_data_values:
         series_data.append({
             "name": "Record Count (Forecast)",
@@ -248,7 +461,7 @@ def get_time_series_data(df, target_column=None):
     return {
         "timeColumn": date_col,
         "seriesData": series_data,
-        "xAxisData": all_dates  # Send the combined x-axis to the frontend
+        "xAxisData": all_dates
     }
 
 # --- NEW CORRELATION FUNCTION ---

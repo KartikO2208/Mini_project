@@ -5,12 +5,14 @@ from fastapi.encoders import jsonable_encoder
 import json
 
 class WorkflowExecutor:
-    def __init__(self, nodes: list, edges: list, file_contents: bytes):
+    def __init__(self, nodes: list, edges: list, file_contents: bytes, file_name: str): # <-- 1. ADD file_name
         self.graph = self._build_graph(nodes, edges)
         self.node_instances = self._instantiate_nodes(nodes)
         self.file_contents = file_contents
-        self.execution_results = {} 
+        self.file_name = file_name # <-- 2. STORE file_name
+        self.execution_results = {}
 
+    # ... (Your _build_graph and _instantiate_nodes functions are unchanged) ...
     def _build_graph(self, nodes: list, edges: list) -> nx.DiGraph:
         graph = nx.DiGraph()
         for node in nodes:
@@ -36,8 +38,8 @@ class WorkflowExecutor:
             instances[node_id] = node_class(node_id=node_id, node_type=node_type)
         return instances
 
-    def run(self) -> str: # Change return type hint to str
-        """ Executes the workflow in topological order. """
+
+    def run(self) -> str:
         execution_order = list(nx.topological_sort(self.graph))
         
         print(f"Execution order: {execution_order}")
@@ -50,13 +52,17 @@ class WorkflowExecutor:
                 if self.file_contents is None:
                     raise ValueError("Workflow started but no file was provided.")
                 inputs_for_this_node['file_contents'] = self.file_contents
+                inputs_for_this_node['file_name'] = self.file_name # <-- 3. PASS file_name
             else:
                 parent_node_ids = list(self.graph.predecessors(node_id))
                 
                 for parent_id in parent_node_ids:
                     edge_data = self.graph.get_edge_data(parent_id, node_id)
                     parent_result = self.execution_results.get(parent_id)
-                    input_handle_id = edge_data.get('targetHandle', 'input_1') 
+                    # Handle both 'input' and 'input_1' handle IDs for compatibility
+                    target_handle = edge_data.get('targetHandle', 'input')
+                    # Map 'input' to 'input_1' for backend compatibility
+                    input_handle_id = 'input_1' if target_handle == 'input' else target_handle
                     inputs_for_this_node[input_handle_id] = parent_result
 
             print(f"--- Executing Node: {node_instance.node_type} ({node_id}) ---")
@@ -64,28 +70,16 @@ class WorkflowExecutor:
             
             self.execution_results[node_id] = result
 
-        # Return the result of the *last* node in the execution
-        final_node_id = execution_order[-1]
-        final_result = self.execution_results.get(final_node_id)
+        final_result = self.execution_results.get(execution_order[-1])
         
-        
-        # --- THIS IS THE FIX ---
-        
-        # Case 1: The final node was 'Analyze Data', which returns a DICT.
-        # This dict contains Timestamps, so we must use jsonable_encoder.
         if isinstance(final_result, dict):
             print("Final result is a dict, using jsonable_encoder...")
             encoded_result = jsonable_encoder(final_result)
             return json.dumps(encoded_result)
 
-        # Case 2: The final node was 'Remove Duplicates' or 'Load CSV'.
-        # These return a pandas DataFrame.
         if isinstance(final_result, pd.DataFrame):
             print("Final result is a DataFrame, using pandas .to_json()...")
-            # Use pandas's built-in JSON converter, which handles NumPy types.
             return final_result.to_json(orient='records')
         
-        # Fallback for any other type
         print(f"Final result is an unknown type: {type(final_result)}")
         return json.dumps(jsonable_encoder(final_result))
-        # --- END OF FIX ---

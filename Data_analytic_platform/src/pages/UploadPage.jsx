@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
@@ -6,6 +5,7 @@ import useDashboardStore from '../store';
 import UploadAnimation from '../components/UploadAnimation';
 import { UploadCloud, FileCheck, Loader, ArrowRight } from 'lucide-react';
 import Papa from 'papaparse';
+import * as XLSX from 'xlsx'; // <-- 1. IMPORT THE NEW XLSX LIBRARY
 
 // We use 'export default' to match your project's pattern
 export default function UploadPage() {
@@ -20,7 +20,6 @@ export default function UploadPage() {
   const [error, setError] = useState(null);
   const navigate = useNavigate();
   
-  // Get the new function from the store
   const setInitialAnalysis = useDashboardStore((state) => state.setInitialAnalysis);
 
   const handleFileChange = (event) => {
@@ -30,16 +29,48 @@ export default function UploadPage() {
     setFile(selectedFile);
     setError(null);
     setStep(2);
+    
+    const extension = selectedFile.name.split('.').pop().toLowerCase();
 
-    Papa.parse(selectedFile, {
-      preview: 1, // Only read the first row
-      complete: (results) => {
-        setFileHeaders(results.data[0]);
-        // Auto-select defaults
-        setDistColumn(results.data[0].find(h => h.includes('category')) || results.data[0][0]);
-        setTimeColumn(results.data[0].find(h => h.includes('date')) || results.data[0][0]);
-      }
-    });
+    // --- 2. THIS IS THE NEW "SMART" LOGIC ---
+    if (extension === 'csv') {
+      // --- Use PapaParse for CSVs ---
+      Papa.parse(selectedFile, {
+        preview: 1, // Only read the first row
+        complete: (results) => {
+          setFileHeaders(results.data[0]);
+          setDistColumn(results.data[0].find(h => h.includes('category')) || results.data[0][0]);
+          setTimeColumn(results.data[0].find(h => h.includes('date')) || results.data[0][0]);
+        }
+      });
+    } else if (extension === 'xls' || extension === 'xlsx') {
+      // --- Use XLSX for Excel Files ---
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const data = new Uint8Array(e.target.result);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const sheetName = workbook.SheetNames[0]; // Get the first sheet
+        const worksheet = workbook.Sheets[sheetName];
+        // Convert sheet to JSON, but only the header row
+        const headers = XLSX.utils.sheet_to_json(worksheet, { header: 1 })[0]; 
+        
+        setFileHeaders(headers);
+        setDistColumn(headers.find(h => h.includes('Category')) || headers[0]);
+        setTimeColumn(headers.find(h => h.includes('Date')) || headers[0]);
+      };
+      reader.readAsArrayBuffer(selectedFile);
+    } else {
+      // For other file types (JSON, Parquet), we'll let the backend
+      // discover the headers. We can't parse them easily in the browser.
+      // We'll just pass an empty array and let the user type them (a future upgrade).
+      // For now, we'll just show a simplified message.
+      setFileHeaders(['auto-detect']);
+      setDistColumn('auto-detect');
+      setTimeColumn('auto-detect');
+      // Or, we could just run the analysis immediately.
+      // Let's stick to the mapping step for consistency.
+    }
+    // --- END OF NEW LOGIC ---
   };
 
   const handleRunAnalysis = async () => {
@@ -54,16 +85,14 @@ export default function UploadPage() {
     formData.append('col_time_target', timeColumn);
 
     try {
-      // This is the initial analysis call
       const response = await axios.post("http://127.0.0.1:8000/api/v1/analyze", formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
       
-      // --- NEW: Save the base data and file to the store ---
       setInitialAnalysis(file, response.data);
       
       setIsLoading(false);
-      navigate('/workspace'); // <-- NEW: Redirect to the workspace
+      navigate('/workspace');
 
     } catch (err) {
       setIsLoading(false);
@@ -87,14 +116,14 @@ export default function UploadPage() {
           <>
             <UploadAnimation />
             <h2>AI-Powered Data Platform</h2>
-            <p>Upload your CSV file to begin analysis.</p>
+            <p>Upload your CSV, Excel, or Parquet file to begin analysis.</p>
             <label className="upload-button">
               <UploadCloud size={20} />
               Select File to Analyze
               <input 
                 type="file" 
                 onChange={handleFileChange} 
-                accept=".csv"
+                accept=".csv,.xlsx,.xls,.json,.parquet,.feather,.h5" // <-- Accept prop is already correct
               />
             </label>
           </>

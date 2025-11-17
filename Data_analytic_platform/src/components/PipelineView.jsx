@@ -4,45 +4,35 @@ import ReactFlow, {
   addEdge,
   useNodesState,
   useEdgesState,
+  useUpdateNodeInternals,
   Controls,
   Background,
-  MiniMap,
-  Handle,
-  Position
-} from 'reactflow';
+  MiniMap
+} from 'reactflow'; 
 import 'reactflow/dist/style.css';
 import axios from 'axios';
 import useDashboardStore from '../store';
-import Papa from 'papaparse'; // <-- 1. IMPORT PAPAPARSE FOR DOWNLOADING
-import { Loader, Download } from 'lucide-react'; // <-- 2. IMPORT DOWNLOAD ICON
+import { Loader, Download, Play } from 'lucide-react';
+import Papa from 'papaparse';
 
 import PipelineSidebar from './PipelineSidebar';
+import CustomPipelineNode from './CustomPipelineNode';
 import './PipelineBuilder.css';
 
-// --- (CustomNode component is the same) ---
-const CustomNode = ({ data }) => {
-  return (
-    <div className="custom-node-body">
-      <strong>{data.label}</strong>
-      {data.node_type !== 'load_csv' && (
-        <Handle type="target" position={Position.Left} id="input_1" />
-      )}
-      {(data.node_type === 'load_csv' || data.node_type === 'clean_data') && (
-         <Handle type="source" position={Position.Right} id="output_1" />
-      )}
-    </div>
-  );
+// --- Register the new node type ---
+const nodeTypes = {
+  custom: CustomPipelineNode,
 };
-const nodeTypes = { custom: CustomNode };
+
 let id = 0;
 const getId = () => `dndnode_${id++}`;
-// --- (End CustomNode) ---
 
 export default function PipelineView() {
   const reactFlowWrapper = useRef(null);
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [reactFlowInstance, setReactFlowInstance] = useState(null);
+  const updateNodeInternals = useUpdateNodeInternals();
   
   const file = useDashboardStore((state) => state.file);
   const setPipelineData = useDashboardStore((state) => state.setPipelineData);
@@ -50,8 +40,6 @@ export default function PipelineView() {
   const [result, setResult] = useState(null);
   const [fileName, setFileName] = useState("No file selected");
   const [isLoading, setIsLoading] = useState(false);
-  
-  // --- 3. ADD NEW STATE TO HOLD THE DOWNLOADABLE DATA ---
   const [downloadableData, setDownloadableData] = useState(null);
 
   useEffect(() => {
@@ -60,10 +48,52 @@ export default function PipelineView() {
     }
   }, [file]);
 
+  // Connection event handlers
+  const onConnectStart = useCallback((event, { nodeId, handleId, handleType }) => {
+    console.log('🔵🔵🔵 Connection started:', { nodeId, handleId, handleType, event });
+    alert(`Connection started from node ${nodeId}, handle ${handleId}`);
+  }, []);
+
+  const onConnectEnd = useCallback((event) => {
+    console.log('🔴🔴🔴 Connection ended:', event);
+  }, []);
+  
+  // Debug: Log when clicking anywhere on canvas
+  useEffect(() => {
+    const handleCanvasClick = (e) => {
+      console.log('Canvas clicked:', e.target, e.target.classList);
+    };
+    const canvas = reactFlowWrapper.current;
+    if (canvas) {
+      canvas.addEventListener('click', handleCanvasClick);
+      return () => canvas.removeEventListener('click', handleCanvasClick);
+    }
+  }, []);
+
   const onConnect = useCallback(
-    (params) => setEdges((eds) => addEdge({ ...params, animated: true, type: 'smoothstep' }, eds)),
+    (params) => {
+      console.log('onConnect called with params:', params);
+      setEdges((eds) => {
+        const newEdges = addEdge({ ...params, animated: true, type: 'smoothstep' }, eds);
+        console.log('New edges array:', newEdges);
+        return newEdges;
+      });
+    },
     [setEdges],
   );
+  
+  // Connection validation - allow connections from source to target
+  const isValidConnection = useCallback((connection) => {
+    console.log('Validating connection:', connection);
+    // Don't allow self-connections
+    if (connection.source === connection.target) {
+      console.log('Rejected: self-connection');
+      return false;
+    }
+    // Allow all valid connections
+    console.log('Connection validated successfully');
+    return true;
+  }, []);
 
   const onDragOver = useCallback((event) => {
     event.preventDefault();
@@ -73,29 +103,58 @@ export default function PipelineView() {
   const onDrop = useCallback(
     (event) => {
       event.preventDefault();
-      const reactFlowBounds = reactFlowWrapper.current.getBoundingClientRect();
-      const nodeInfo = JSON.parse(event.dataTransfer.getData('application/reactflow'));
-      const position = reactFlowInstance.project({
-        x: event.clientX - reactFlowBounds.left,
-        y: event.clientY - reactFlowBounds.top,
-      });
-      const newNode = {
-        id: getId(),
-        type: 'custom', 
-        position,
-        data: { 
-          label: nodeInfo.label,
-          node_type: nodeInfo.node_type 
-        },
-      };
-      setNodes((nds) => nds.concat(newNode));
+      
+      if (!reactFlowInstance) {
+        console.error('ReactFlow instance not initialized');
+        return;
+      }
+
+      try {
+        const reactFlowBounds = reactFlowWrapper.current.getBoundingClientRect();
+        const nodeInfo = JSON.parse(event.dataTransfer.getData('application/reactflow'));
+
+        const position = reactFlowInstance.project({
+          x: event.clientX - reactFlowBounds.left,
+          y: event.clientY - reactFlowBounds.top,
+        });
+
+        const newNode = {
+          id: getId(),
+          type: 'custom', 
+          position,
+          data: { 
+            label: nodeInfo.label,
+            node_type: nodeInfo.node_type 
+          },
+        };
+
+        setNodes((nds) => {
+          const updatedNodes = nds.concat(newNode);
+          // Update node internals after a short delay to ensure handles are registered
+          setTimeout(() => {
+            updateNodeInternals(newNode.id);
+          }, 50);
+          return updatedNodes;
+        });
+      } catch (error) {
+        console.error('Error dropping node:', error);
+      }
     },
-    [reactFlowInstance, setNodes],
+    [reactFlowInstance, setNodes, updateNodeInternals],
   );
+  
+  // Update node internals when nodes change
+  useEffect(() => {
+    if (nodes.length > 0) {
+      nodes.forEach((node) => {
+        updateNodeInternals(node.id);
+      });
+    }
+  }, [nodes.length, updateNodeInternals]);
 
   const handleRunPipeline = async () => {
     if (!file) {
-      alert("Go back to the Upload Page to select a file first!");
+      alert("No file is loaded. Please go to the Home page and upload a file first.");
       return;
     }
     if (nodes.length === 0) {
@@ -106,7 +165,7 @@ export default function PipelineView() {
     const pipeline = { nodes, edges };
     setIsLoading(true);
     setResult(`Running workflow on '${fileName}'...`);
-    setDownloadableData(null); // Clear old download data
+    setDownloadableData(null);
 
     const formData = new FormData();
     formData.append('file', file);
@@ -120,22 +179,20 @@ export default function PipelineView() {
       );
       
       const responseData = response.data.result;
-      const rawData = JSON.parse(responseData); // Parse the JSON from the string
+      const rawData = JSON.parse(responseData);
       
       const lastNode = nodes.find(n => n.data.node_type === 'analyze_data');
       if (lastNode && !edges.some(e => e.source === lastNode.id)) {
-        setPipelineData(rawData); // Send to dashboard
-        setResult("Analysis complete! Check the 'Dashboard' tab for results.");
-        setDownloadableData(null); // No download for dashboard
+        setPipelineData(rawData); 
+        setResult("Analysis complete! Check the '/dashboard' page for updated results.");
+        setDownloadableData(null);
       } else {
-        // --- 4. SAVE DATA FOR DOWNLOAD ---
-        setResult(JSON.stringify(rawData, null, 2)); // Show pretty JSON
-        setDownloadableData(rawData); // Save the raw data object
+        setResult(JSON.stringify(rawData, null, 2));
+        setDownloadableData(rawData);
       }
       setIsLoading(false);
 
     } catch (error) {
-      console.error("Error running pipeline:", error);
       const errorMsg = error.response ? error.response.data.detail : "An error occurred.";
       setResult(`Error: ${errorMsg}`);
       setIsLoading(false);
@@ -143,27 +200,16 @@ export default function PipelineView() {
     }
   };
 
-  // --- 5. NEW FUNCTION TO HANDLE THE DOWNLOAD ---
   const handleDownload = () => {
     if (!downloadableData) return;
-
-    // Convert the JSON object back into a CSV string
     const csvString = Papa.unparse(downloadableData);
-    
-    // Create a "blob" (a file in memory)
     const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
-    
-    // Create a temporary link to download the blob
     const link = document.createElement('a');
     const url = URL.createObjectURL(blob);
     link.setAttribute('href', url);
     link.setAttribute('download', 'cleaned_data.csv');
     document.body.appendChild(link);
-    
-    // Click the link to trigger the download
     link.click();
-    
-    // Clean up
     document.body.removeChild(link);
   };
 
@@ -178,11 +224,23 @@ export default function PipelineView() {
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
+            onConnectStart={onConnectStart}
+            onConnectEnd={onConnectEnd}
             onInit={setReactFlowInstance}
             onDrop={onDrop}
             onDragOver={onDragOver}
             nodeTypes={nodeTypes}
+            isValidConnection={isValidConnection}
+            connectionMode="loose"
+            defaultEdgeOptions={{ type: 'smoothstep', animated: true }}
+            snapToGrid={false}
             fitView
+            proOptions={{ hideAttribution: true }}
+            deleteKeyCode={['Backspace', 'Delete']}
+            selectNodesOnDrag={false}
+            nodesDraggable={true}
+            nodesConnectable={true}
+            elementsSelectable={true}
           >
             <Controls />
             <MiniMap />
@@ -190,9 +248,10 @@ export default function PipelineView() {
           </ReactFlow>
           
           <div className="control-panel">
-            <span className="file-name">File: **{fileName}**</span>
+            <span className="file-name"><strong>File:</strong> {fileName}</span>
             <button className="run-button" onClick={handleRunPipeline} disabled={isLoading}>
-              {isLoading ? <Loader size={16} className="spinner" /> : '► Run Pipeline'}
+              {isLoading ? <Loader size={16} className="spinner" /> : <Play size={16} fill="white"/>}
+              {isLoading ? "Running..." : "Run Pipeline"}
             </button>
           </div>
         </div>
@@ -200,7 +259,6 @@ export default function PipelineView() {
       
       {result && (
         <div className="result-panel">
-          {/* --- 6. ADD THE DOWNLOAD BUTTON --- */}
           <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
             <h3>Pipeline Output:</h3>
             {downloadableData && (
@@ -210,7 +268,9 @@ export default function PipelineView() {
               </button>
             )}
           </div>
-          <pre>{result}</pre>
+          <pre className={result.startsWith("Error:") ? 'error' : ''}>
+            {result}
+          </pre>
         </div>
       )}
     </div>

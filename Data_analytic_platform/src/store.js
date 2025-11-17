@@ -2,20 +2,11 @@ import { create } from 'zustand';
 
 // We use 'export default' to match your project's pattern
 export default create((set) => ({
-  // The raw file, for the pipeline to use
+  // The raw file, for the pipeline and mapping
   file: null,
-  
-  // Data for the *initial* analysis (from UploadPage)
-  // We keep this to remember the original state
-  kpiData: null,
-  insights: null,
-  dictionary: null,
-  columnDist: null,
-  timeSeries: null,
-  tableData: null,
-  dataHealth: null,
-  correlationMatrix: null,
-  
+  fileHeaders: [], // To store the parsed column names
+  rawData: null, // To store the parsed JSON data from the file
+
   // Data for the *pipeline* result (this is what the Dashboard tab shows)
   pipeline_kpiData: null,
   pipeline_insights: null,
@@ -26,32 +17,24 @@ export default create((set) => ({
   pipeline_dataHealth: null,
   pipeline_correlationMatrix: null,
   
-  // This is called from UploadPage
-  setInitialAnalysis: (file, data) => set({
+  // This is called from UploadModal
+  setFile: (file, headers, rawData = null) => set({
     file: file,
-    
-    // Set the "original" data
-    kpiData: data?.kpiData || null,
-    insights: data?.insights || null,
-    dictionary: data?.dictionary || null,
-    columnDist: data?.columnDist || null,
-    timeSeries: data?.timeSeries || null,
-    tableData: data?.tableData || null,
-    dataHealth: data?.dataHealth || null,
-    correlationMatrix: data?.correlationMatrix || null,
-    
-    // ALSO set the "pipeline" data, so the dashboard shows the initial analysis
-    pipeline_kpiData: data?.kpiData || null,
-    pipeline_insights: data?.insights || null,
-    pipeline_dictionary: data?.dictionary || null,
-    pipeline_columnDist: data?.columnDist || null,
-    pipeline_timeSeries: data?.timeSeries || null,
-    pipeline_tableData: data?.tableData || null,
-    pipeline_dataHealth: data?.dataHealth || null,
-    pipeline_correlationMatrix: data?.correlationMatrix || null,
+    fileHeaders: headers,
+    rawData: rawData,
+    // Clear all old analysis data when a new file is uploaded
+    pipeline_kpiData: null,
+    pipeline_insights: null,
+    pipeline_dictionary: null,
+    pipeline_columnDist: null,
+    pipeline_timeSeries: null,
+    pipeline_tableData: null,
+    pipeline_dataHealth: null,
+    pipeline_correlationMatrix: null,
   }),
   
-  // This is called from PipelineView when an "Analyze" node runs
+  // This is called from the new mapping component on the WorkspacePage
+  // OR from the PipelineView
   setPipelineData: (data) => set({
     pipeline_kpiData: data?.kpiData || null,
     pipeline_insights: data?.insights || null,
@@ -63,11 +46,11 @@ export default create((set) => ({
     pipeline_correlationMatrix: data?.correlationMatrix || null,
   }),
   
-  // This is called from the Navbar
+  // This is called from the Navbar or when navigating home
   clearAnalysisData: () => set({
     file: null,
-    kpiData: null, insights: null, dictionary: null, columnDist: null,
-    timeSeries: null, tableData: null, dataHealth: null, correlationMatrix: null,
+    fileHeaders: [],
+    rawData: null,
     pipeline_kpiData: null, pipeline_insights: null, pipeline_dictionary: null,
     pipeline_columnDist: null, pipeline_timeSeries: null, pipeline_tableData: null,
     pipeline_dataHealth: null, pipeline_correlationMatrix: null,
