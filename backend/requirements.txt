@@ -7,6 +7,8 @@ pydantic
 networkx
 pandas
 openpyxl
+numpy
+pyarrow
 xlrd<2.0
 statsmodels
 python-multipart

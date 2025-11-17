@@ -4,6 +4,7 @@ import HomePage from './pages/ToolkitPage';
 import DashboardPage from './pages/DashboardPage'; // <-- 1. IMPORT
 import PipelinePage from './pages/PipelinePage';   // <-- 2. IMPORT
 import AIAnalysisPage from './pages/AIAnalysisPage';
+import FileConverterPage from './pages/FileConverterPage';
 
 // In your routes section:
 
@@ -19,6 +20,7 @@ export default function App() {
       <Route path="/dashboard" element={<DashboardPage />} />
       <Route path="/pipeline" element={<PipelinePage />} />
       <Route path="/ai-analysis" element={<AIAnalysisPage />} />
+      <Route path="/file-converter" element={<FileConverterPage />} />
       
       {/* Placeholder routes */}
       <Route path="/support" element={<div>Support Page</div>} />

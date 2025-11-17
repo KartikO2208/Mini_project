@@ -167,7 +167,15 @@ const AnalysisCard = ({ node, onDragStart }) => {
 
 
 // --- Canvas Components ---
-const PipelineCanvas = ({ nodes, connections, onCanvasDrop, onNodeDrag, setSelectedNode, selectedNodeId }) => {
+const PipelineCanvas = ({ 
+  nodes, 
+  connections, 
+  onCanvasDrop, 
+  onNodeDrag, 
+  setSelectedNode, 
+  selectedNodeId,
+  onHandleMouseDown
+}) => {
   const canvasRef = useRef(null);
   const [isDraggingOver, setIsDraggingOver] = useState(false);
 
@@ -229,6 +237,7 @@ const PipelineCanvas = ({ nodes, connections, onCanvasDrop, onNodeDrag, setSelec
           onDrag={onNodeDrag} 
           onSelect={setSelectedNode}
           isSelected={node.id === selectedNodeId}
+          onHandleMouseDown={onHandleMouseDown}
         />
       ))}
     </div>
@@ -254,7 +263,7 @@ const ConnectionLine = ({ conn }) => {
   );
 };
 
-const CanvasNode = ({ node, index, onDrag, onSelect, isSelected }) => {
+const CanvasNode = ({ node, index, onDrag, onSelect, isSelected, onHandleMouseDown }) => {
   const Icon = node.icon;
   const nodeRef = useRef(null);
 
@@ -292,11 +301,6 @@ const CanvasNode = ({ node, index, onDrag, onSelect, isSelected }) => {
     onSelect(node.id);
   }
 
-  const handleHandleMouseDown = (e, handleType) => {
-    e.stopPropagation();
-    // This will be handled by the parent container's handleMouseDownOnHandle
-  };
-
   return (
     <div
       ref={nodeRef}
@@ -329,7 +333,10 @@ const CanvasNode = ({ node, index, onDrag, onSelect, isSelected }) => {
           className="canvas-node-handle input" 
           data-node-id={node.id} 
           data-handle-type="input"
-          onMouseDown={(e) => handleHandleMouseDown(e, 'input')}
+          onMouseDown={(e) => {
+            e.stopPropagation();
+            onHandleMouseDown?.(e);
+          }}
           title="Click and drag to connect"
         />
       )}
@@ -338,7 +345,10 @@ const CanvasNode = ({ node, index, onDrag, onSelect, isSelected }) => {
           className="canvas-node-handle output" 
           data-node-id={node.id} 
           data-handle-type="output"
-          onMouseDown={(e) => handleHandleMouseDown(e, 'output')}
+          onMouseDown={(e) => {
+            e.stopPropagation();
+            onHandleMouseDown?.(e);
+          }}
           title="Click and drag to connect"
         />
       )}
@@ -369,6 +379,23 @@ export default function PipelinePage() {
   // API State
   const [isLoading, setIsLoading] = useState(false);
   const [output, setOutput] = useState(null); // For the output panel
+
+  const buildPipelinePayload = useCallback(() => {
+    const pipelineNodes = nodes.map(n => ({
+      id: n.id,
+      data: { node_type: n.type }
+    }));
+
+    const pipelineEdges = connections.map((c, i) => ({
+      id: `e${i}`,
+      source: c.from,
+      target: c.to,
+      sourceHandle: 'output_1',
+      targetHandle: 'input_1'
+    }));
+
+    return { nodes: pipelineNodes, edges: pipelineEdges };
+  }, [nodes, connections]);
 
   // Set the file name when the file loads from the store
   useEffect(() => {
@@ -547,20 +574,7 @@ export default function PipelinePage() {
     }
     
     // Convert our nodes/connections to what the backend expects
-    const pipelineNodes = nodes.map(n => ({
-      id: n.id,
-      data: { node_type: n.type } // Send the type ('load_csv', 'clean_data', etc.)
-    }));
-    
-    const pipelineEdges = connections.map((c, i) => ({
-      id: `e${i}`,
-      source: c.from,
-      target: c.to,
-      sourceHandle: 'output_1', // We only have one handle
-      targetHandle: 'input_1'
-    }));
-
-    const pipeline = { nodes: pipelineNodes, edges: pipelineEdges };
+    const pipeline = buildPipelinePayload();
     
     setIsLoading(true);
     setOutput({ message: `Running workflow on '${fileName}'...` });
@@ -582,8 +596,10 @@ export default function PipelinePage() {
       const lastNode = nodes.find(n => n.type === 'analyze_data');
       if (lastNode && !connections.some(c => c.from === lastNode.id)) {
         setPipelineData(rawData); 
-        setOutput({ message: "Analysis complete! Redirecting to dashboard..." });
-        setTimeout(() => navigate('/dashboard'), 1500); // Go to dashboard
+        setOutput({ 
+          message: "Analysis complete! You can open the dashboard to view results.",
+          nextAction: 'dashboard'
+        });
       } else {
         setOutput({ message: JSON.stringify(rawData, null, 2) });
       }
@@ -599,20 +615,57 @@ export default function PipelinePage() {
 
 
   // Pipeline save and export handlers
-  const handlePipelineSave = () => {
-    console.log("Pipeline Saved!");
-    // You can implement actual save logic here
-  };
+  const handlePipelineSave = useCallback(() => {
+    if (!nodes.length) {
+      alert("Add at least one node before saving the pipeline.");
+      return;
+    }
 
-  const handlePipelineExport = () => {
-    console.log("Pipeline Exported!");
-    // You can implement actual export logic here
-  };
+    try {
+      const payload = {
+        fileName,
+        pipeline: buildPipelinePayload(),
+        savedAt: new Date().toISOString()
+      };
+      localStorage.setItem('pipelineDraft', JSON.stringify(payload));
+      setOutput({ message: "Pipeline saved locally. Use Export to download a JSON file." });
+    } catch (error) {
+      console.error("Error saving pipeline:", error);
+      setOutput({ error: "Unable to save pipeline in this browser." });
+    }
+  }, [nodes.length, fileName, buildPipelinePayload]);
+
+  const handlePipelineExport = useCallback(() => {
+    if (!nodes.length) {
+      alert("Add at least one node before exporting the pipeline.");
+      return;
+    }
+
+    try {
+      const payload = {
+        fileName,
+        pipeline: buildPipelinePayload(),
+        exportedAt: new Date().toISOString()
+      };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${fileName.replace(/\.[^/.]+$/, '') || 'pipeline'}_workflow.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      setOutput({ message: "Pipeline exported as JSON." });
+    } catch (error) {
+      console.error("Error exporting pipeline:", error);
+      setOutput({ error: "Unable to export pipeline." });
+    }
+  }, [nodes.length, fileName, buildPipelinePayload]);
 
   return (
     <div 
       className="pipeline-page-container"
-      onMouseDown={handleMouseDownOnHandle}
     >
       {/* Navbar */}
       <Navbar 
@@ -633,6 +686,7 @@ export default function PipelinePage() {
           onNodeDrag={handleNodeDrag}
           setSelectedNode={setSelectedNode}
           selectedNodeId={selectedNode}
+          onHandleMouseDown={handleMouseDownOnHandle}
         />
         
         {/* Control Panel with File Info and Run Button */}
@@ -652,7 +706,17 @@ export default function PipelinePage() {
         <div className="pipeline-output-panel">
           <div className="pipeline-output-header">
             <h3>Pipeline Output:</h3>
-            <p onClick={() => setOutput(null)} style={{cursor: 'pointer'}}>Close</p>
+            <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+              {output.nextAction === 'dashboard' && (
+                <button 
+                  className="output-action-button"
+                  onClick={() => navigate('/dashboard')}
+                >
+                  Open Dashboard
+                </button>
+              )}
+              <p onClick={() => setOutput(null)} style={{cursor: 'pointer'}}>Close</p>
+            </div>
           </div>
           <div className="pipeline-output-body">
             <pre className={output.error ? 'error' : ''}>

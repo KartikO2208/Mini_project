@@ -30,10 +30,10 @@ const tools = [
   },
   {
     title: "File Converter",
-    description: "Convert between CSV, JSON, and Parquet. (Coming Soon)",
+    description: "Convert between CSV, JSON, and Parquet with one click.",
     icon: <Repeat2 />,
-    action: 'disabled',
-    destination: null,
+    action: 'navigate',
+    destination: '/file-converter',
   },
 ];
 

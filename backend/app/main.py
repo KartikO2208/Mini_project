@@ -1,8 +1,10 @@
 import pandas as pd
 import io
 import json
+from pathlib import Path
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 import uvicorn
 
 # --- Make sure this import is correct ---
@@ -76,6 +78,53 @@ async def analyze_file(
         import traceback
         traceback.print_exc() 
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/v1/convert")
+async def convert_file(
+    file: UploadFile = File(...),
+    target_format: str = Form(...)
+):
+    supported_formats = {"csv", "json", "parquet"}
+    target_format_lower = (target_format or "").strip().lower()
+    if target_format_lower not in supported_formats:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported target format '{target_format}'. Choose one of {', '.join(sorted(supported_formats))}."
+        )
+
+    contents = await file.read()
+    if not contents:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+
+    try:
+        df = read_uploaded_file_to_df(contents, file.filename)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    output_buffer = io.BytesIO()
+    media_type = "application/octet-stream"
+    output_extension = target_format_lower
+
+    try:
+        if target_format_lower == "csv":
+            media_type = "text/csv"
+            output_buffer.write(df.to_csv(index=False).encode("utf-8"))
+        elif target_format_lower == "json":
+            media_type = "application/json"
+            output_buffer.write(df.to_json(orient="records").encode("utf-8"))
+        elif target_format_lower == "parquet":
+            df.to_parquet(output_buffer, index=False)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to convert file: {exc}") from exc
+
+    output_buffer.seek(0)
+    original_stem = Path(file.filename).stem or "converted_file"
+    download_filename = f"{original_stem}_converted.{output_extension}"
+
+    headers = {
+        "Content-Disposition": f'attachment; filename="{download_filename}"'
+    }
+    return StreamingResponse(output_buffer, media_type=media_type, headers=headers)
 
 # --- ENDPOINT 2: For the Pipeline Builder Page ---
 @app.post("/workflow/run/")
