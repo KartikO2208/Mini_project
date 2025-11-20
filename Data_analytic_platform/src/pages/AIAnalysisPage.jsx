@@ -91,7 +91,7 @@ export default function AIAnalysisPage() {
 
   const handleSend = async () => {
     if (!input.trim() || isLoading) return;
-
+  
     const userMessage = { 
       role: 'user', 
       content: input,
@@ -101,8 +101,7 @@ export default function AIAnalysisPage() {
     setMessages(prev => [...prev, userMessage]);
     setInput('');
     setIsLoading(true);
-
-    // Simulate AI response
+  
     setTimeout(() => {
       const aiResponse = {
         role: 'assistant',
@@ -114,6 +113,8 @@ export default function AIAnalysisPage() {
       setIsLoading(false);
     }, 1500);
   };
+  
+  
 
   const generateMockResponse = (query) => {
     const responses = [
@@ -180,7 +181,7 @@ export default function AIAnalysisPage() {
                   letterSpacing: '-0.02em',
                   lineHeight: '1.2'
                 }}>
-                  Good Afternoon, Karthik
+                  Good Afternoon, User
                 </h1>
                 <p style={{
                   fontSize: '28px',
@@ -322,7 +323,8 @@ export default function AIAnalysisPage() {
                   <button
                     style={{
                       padding: '12px 20px',
-                      backgroundColor: 'white',
+                      backgroundColor: 
+                      'white',
                       border: '1px solid #E5E7EB',
                       borderRadius: '10px',
                       cursor: 'pointer',
